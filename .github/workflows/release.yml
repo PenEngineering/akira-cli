@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and release
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: true
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          EXT=""
+          [ "$GOOS" = "windows" ] && EXT=".exe"
+          BINARY="akira-cli_${GOOS}_${GOARCH}${EXT}"
+          VERSION="${{ github.ref_name }}"
+          go build \
+            -ldflags "-s -w -X github.com/PenEngineering/akira-cli/cmd.Version=${VERSION}" \
+            -o "dist/${BINARY}" .
+          echo "BINARY=dist/${BINARY}" >> "$GITHUB_ENV"
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: akira-cli_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/
+
+  publish:
+    name: Create GitHub Release
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/
+          merge-multiple: true
+
+      - name: Checksums
+        run: cd dist && sha256sum * > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
