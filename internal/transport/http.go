@@ -46,11 +46,17 @@ func (c *HTTPClient) Install(pkgPath string) (string, error) {
 	}
 	defer f.Close()
 
+	fi, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat %s: %w", pkgPath, err)
+	}
+
 	url := c.baseURL + "/api/apps/install"
 	req, err := http.NewRequest(http.MethodPost, url, f)
 	if err != nil {
 		return "", fmt.Errorf("build request: %w", err)
 	}
+	req.ContentLength = fi.Size()
 	req.Header.Set("Content-Type", "application/octet-stream")
 	req.Header.Set("Authorization", "Bearer "+c.token)
 

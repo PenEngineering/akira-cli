@@ -20,11 +20,20 @@ import (
 	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/draw"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 	"time"
+
+	_ "golang.org/x/image/bmp"
+	xdraw "golang.org/x/image/draw"
 )
 
 const (
@@ -32,6 +41,49 @@ const (
 	entryWASM      = "app.wasm"
 	entrySignature = "sig.ed25519"
 )
+
+// Binary format magic bytes.
+var (
+	magicWASM = []byte{0x00, 0x61, 0x73, 0x6d} // \0asm  — WebAssembly
+	magicAOT  = []byte{0x00, 0x61, 0x6f, 0x74} // \0aot  — WAMR AOT
+)
+
+// Format identifies a binary's encoding.
+type Format uint8
+
+const (
+	FormatUnknown Format = iota
+	FormatWASM           // raw WebAssembly bytecode (\0asm)
+	FormatAOT            // WAMR AOT native binary  (\0aot)
+	FormatAkpkg          // gzip-compressed tar (.akpkg)
+)
+
+// DetectFormat inspects the leading bytes of data and returns the binary format.
+func DetectFormat(data []byte) Format {
+	if len(data) >= 4 && bytes.Equal(data[:4], magicWASM) {
+		return FormatWASM
+	}
+	if len(data) >= 4 && bytes.Equal(data[:4], magicAOT) {
+		return FormatAOT
+	}
+	// gzip magic: 1f 8b — .akpkg is a gzip-compressed tar.
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		return FormatAkpkg
+	}
+	return FormatUnknown
+}
+
+// ExtractBinary unpacks an .akpkg and returns the inner WASM/AOT binary bytes.
+func ExtractBinary(pkgPath string) ([]byte, error) {
+	_, wasm, _, err := readPkg(pkgPath)
+	if err != nil {
+		return nil, err
+	}
+	if wasm == nil {
+		return nil, fmt.Errorf("no %s entry found in %s", entryWASM, pkgPath)
+	}
+	return wasm, nil
+}
 
 // Info contains metadata extracted from a verified .akpkg.
 type Info struct {
@@ -41,23 +93,103 @@ type Info struct {
 	ManifestSize int64
 }
 
-// Pack creates an unsigned .akpkg from wasmPath and manifestPath, writing to outPath.
-func Pack(wasmPath, manifestPath, outPath string) error {
-	wasmData, err := os.ReadFile(wasmPath)
+// EmbedIcon resizes the image at iconPath to 32×32, encodes it as raw RGB565
+// little-endian (2048 bytes), base64-encodes the result, and injects it as the
+// "icon" field in manifestData. Supports PNG, JPEG, and BMP input.
+func EmbedIcon(manifestData []byte, iconPath string) ([]byte, error) {
+	f, err := os.Open(iconPath)
 	if err != nil {
-		return fmt.Errorf("read wasm: %w", err)
+		return nil, fmt.Errorf("open icon: %w", err)
 	}
+	defer f.Close()
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return nil, fmt.Errorf("decode icon: %w", err)
+	}
+
+	// Resize to 32×32 using CatmullRom (high quality, same as Pillow LANCZOS).
+	dst := image.NewRGBA(image.Rect(0, 0, 32, 32))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+
+	// Convert to raw RGB565 little-endian — 2 bytes per pixel, 2048 bytes total.
+	// R5 G6 B5 packed as uint16: bits [15:11]=R [10:5]=G [4:0]=B
+	raw := make([]byte, 32*32*2)
+	for y := 0; y < 32; y++ {
+		for x := 0; x < 32; x++ {
+			r, g, b, _ := dst.At(x, y).RGBA() // 16-bit per channel
+			pixel := (uint16(r>>11) << 11) | (uint16(g>>10) << 5) | uint16(b>>11)
+			binary.LittleEndian.PutUint16(raw[(y*32+x)*2:], pixel)
+		}
+	}
+
+	iconB64 := base64.StdEncoding.EncodeToString(raw)
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(manifestData, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	m["icon"] = iconB64
+
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal manifest: %w", err)
+	}
+	return append(out, '\n'), nil
+}
+
+// PackWithIcon is like Pack but also embeds an icon image into the manifest.
+func PackWithIcon(binPath, manifestPath, iconPath, outPath string) error {
 	manifestData, err := os.ReadFile(manifestPath)
 	if err != nil {
 		return fmt.Errorf("read manifest: %w", err)
 	}
+	if !json.Valid(manifestData) {
+		return fmt.Errorf("manifest.json is not valid JSON")
+	}
+	manifestData, err = EmbedIcon(manifestData, iconPath)
+	if err != nil {
+		return err
+	}
+	binData, err := os.ReadFile(binPath)
+	if err != nil {
+		return fmt.Errorf("read binary: %w", err)
+	}
+	switch DetectFormat(binData) {
+	case FormatWASM, FormatAOT: // ok
+	default:
+		return fmt.Errorf("%s has unrecognised magic bytes — expected WASM (\\0asm) or AOT (\\0aot)", binPath)
+	}
+	return writePkg(outPath, manifestData, binData, nil)
+}
 
-	// Validate manifest is valid JSON.
+// Pack creates an unsigned .akpkg from binPath (WASM or AOT) and manifestPath,
+// writing to outPath. The binary format is detected via magic bytes.
+func Pack(binPath, manifestPath, outPath string) error {
+	binData, err := os.ReadFile(binPath)
+	if err != nil {
+		return fmt.Errorf("read binary: %w", err)
+	}
+
+	// Validate binary magic — must be WASM or AOT.
+	switch DetectFormat(binData) {
+	case FormatWASM:
+		// ok
+	case FormatAOT:
+		// ok
+	default:
+		return fmt.Errorf("%s has unrecognised magic bytes — expected WASM (\\0asm) or AOT (\\0aot)", binPath)
+	}
+
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
 	if !json.Valid(manifestData) {
 		return fmt.Errorf("manifest.json is not valid JSON")
 	}
 
-	return writePkg(outPath, manifestData, wasmData, nil)
+	return writePkg(outPath, manifestData, binData, nil)
 }
 
 // Sign reads pkgPath, attaches an Ed25519 signature, and writes the result to outPath.

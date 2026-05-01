@@ -15,6 +15,8 @@ import (
 var installDevice string
 var installToken string
 var installTimeout int
+ 
+ 
 
 var installCmd = &cobra.Command{
 	Use:   "install <app.akpkg>",
@@ -24,10 +26,11 @@ var installCmd = &cobra.Command{
 The device must be reachable at the given IP address and the bearer token must
 match CONFIG_AKIRA_OTA_TOKEN in the device's prj.conf.
 
-  akira-cli install hello.akpkg --device 192.168.1.42 --token my-secret
+	akira-cli install hello.akpkg --device 192.168.1.42 --token my-secret
 
 The firmware validates the Ed25519 signature before committing the install.
-Use 'akira-cli sign' first if the package is not yet signed.`,
+Use 'akira-cli sign' first if the package is not yet signed.
+`,
 	Args: cobra.ExactArgs(1),
 	RunE: runInstall,
 }
@@ -55,3 +58,5 @@ func runInstall(_ *cobra.Command, args []string) error {
 	fmt.Printf("OK  %s installed (device response: %s)\n", pkgPath, resp)
 	return nil
 }
+
+

@@ -19,6 +19,7 @@ var rootCmd = &cobra.Command{
 	Long: `akira-cli — package, sign, verify, and deploy WASM applications to AkiraOS devices.
 
 Commands:
+  init     Install AkiraOS development dependencies (WASI SDK, WAMR, wamrc)
   keygen   Generate an Ed25519 keypair and device provisioning bundle
   pack     Bundle a WASM app + manifest into an .akpkg archive
   sign     Sign an .akpkg with an Ed25519 private key

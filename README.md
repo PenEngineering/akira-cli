@@ -9,7 +9,7 @@ Developer toolchain for [AkiraOS](https://github.com/PenEngineering/AkiraOS) —
 brew tap akiraos/tap
 brew install akira-cli
 
-# Go install
+# Go install ( make sure you have the GOBIN in PATH )
 go install github.com/PenEngineering/akira-cli@latest
 
 # Download binary from GitHub Releases
