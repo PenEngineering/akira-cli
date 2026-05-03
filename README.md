@@ -60,13 +60,34 @@ akira-cli verify hello.akpkg --pubkey ./keys/pubkey.pem
 
 ---
 
-### `install` — Push to device over WiFi
+### `install` — Push to device
 
+**Over WiFi (HTTP):**
 ```sh
 akira-cli install hello.akpkg --device 192.168.1.42 --token my-ota-secret
 ```
 
-POSTs the `.akpkg` to `http://<device>/api/apps/install` with a `Bearer` token. The firmware validates the signature before committing.
+POSTs the `.akpkg` to `http://<device>/api/apps/install` with a `Bearer` token.
+
+**Over USB HID:**
+```sh
+akira-cli install hello.akpkg --transport usb
+```
+
+Streams the package directly to the device over the USB HID raw channel (Report ID 3, Usage Page 0xFF60). No IP address or token required — just plug in.
+
+> **Linux:** USB HID devices are restricted to root by default. Install the udev rule once:
+> ```sh
+> make udev-install
+> # or manually:
+> sudo cp scripts/99-akiraos.rules /etc/udev/rules.d/
+> sudo udevadm control --reload-rules && sudo udevadm trigger
+> sudo usermod -aG plugdev $USER   # log out and back in
+> ```
+
+> **macOS:** No extra setup needed — IOKit grants user-space access automatically.
+
+> **Windows:** No extra setup needed — WinUSB/HID class driver is used directly.
 
 ---
 

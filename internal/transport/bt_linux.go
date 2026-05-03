@@ -36,7 +36,6 @@ import (
 "fmt"
 "hash/crc32"
 "os"
-"path/filepath"
 "strings"
 "time"
 
@@ -225,11 +224,6 @@ if err := binary.Write(&buf, binary.LittleEndian, hdr); err != nil {
 return nil, err
 }
 return buf.Bytes(), nil
-}
-
-func appNameFromPath(pkgPath string) string {
-base := filepath.Base(pkgPath)
-return strings.TrimSuffix(base, ".akpkg")
 }
 
 // ---- Connection & GATT helpers ----------------------------------------------

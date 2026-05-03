@@ -37,6 +37,12 @@ release: clean
 	@cd dist && sha256sum * > checksums.txt
 	@echo "Artifacts in dist/"
 
+## udev-install: install udev rules for AkiraOS USB HID access on Linux (requires sudo)
+udev-install:
+	sudo cp scripts/99-akiraos.rules /etc/udev/rules.d/
+	sudo udevadm control --reload-rules && sudo udevadm trigger
+	@echo "Rules installed. Run: sudo usermod -aG plugdev $$USER  (then log out/in)"
+
 ## clean: remove build artefacts
 clean:
 	rm -rf $(BINARY) dist/

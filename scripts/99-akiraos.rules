@@ -1,0 +1,11 @@
+# udev rules for AkiraOS devices
+# Grants all members of the "plugdev" group access to the AkiraOS USB HID
+# interface without requiring root.
+#
+# Install:
+#   sudo cp 99-akiraos.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   sudo usermod -aG plugdev $USER   # log out / in afterwards
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2fe3", ATTRS{idProduct}=="0001", \
+    MODE="0660", GROUP="plugdev", TAG+="uaccess"

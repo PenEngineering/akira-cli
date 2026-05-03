@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"hash/crc32"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -309,9 +308,4 @@ func buildStartCmd(appName string, data []byte) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func appNameFromPath(pkgPath string) string {
-	base := filepath.Base(pkgPath)
-	return strings.TrimSuffix(base, ".akpkg")
 }
