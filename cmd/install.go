@@ -29,7 +29,7 @@ Three transports are supported:
     The device must be reachable at the given IP address and the bearer token
     must match CONFIG_AKIRA_OTA_TOKEN in the device's prj.conf.
 
-      akira-cli install hello.akpkg --device 192.168.1.42 --token my-secret
+      akira-cli install hello.akpkg --device 192.168.1.42:8080 --token my-secret
 
   Bluetooth LE (GATT):
     The device must be advertising the AkiraOS App Transfer Service and within

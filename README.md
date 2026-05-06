@@ -64,7 +64,7 @@ akira-cli verify hello.akpkg --pubkey ./keys/pubkey.pem
 
 **Over WiFi (HTTP):**
 ```sh
-akira-cli install hello.akpkg --device 192.168.1.42 --token my-ota-secret
+akira-cli install hello.akpkg --device 192.168.1.42:8080 --token my-ota-secret
 ```
 
 POSTs the `.akpkg` to `http://<device>/api/apps/install` with a `Bearer` token.

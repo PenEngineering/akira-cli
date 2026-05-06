@@ -39,6 +39,7 @@ import (
 const (
 	entryManifest  = "manifest.json"
 	entryWASM      = "app.wasm"
+	entryAOT       = "app.aot"
 	entrySignature = "sig.ed25519"
 )
 
@@ -75,14 +76,14 @@ func DetectFormat(data []byte) Format {
 
 // ExtractBinary unpacks an .akpkg and returns the inner WASM/AOT binary bytes.
 func ExtractBinary(pkgPath string) ([]byte, error) {
-	_, wasm, _, err := readPkg(pkgPath)
+	_, binary, _, err := readPkg(pkgPath)
 	if err != nil {
 		return nil, err
 	}
-	if wasm == nil {
-		return nil, fmt.Errorf("no %s entry found in %s", entryWASM, pkgPath)
+	if binary == nil {
+		return nil, fmt.Errorf("no app.wasm or app.aot entry found in %s", pkgPath)
 	}
-	return wasm, nil
+	return binary, nil
 }
 
 // Info contains metadata extracted from a verified .akpkg.
@@ -194,30 +195,30 @@ func Pack(binPath, manifestPath, outPath string) error {
 
 // Sign reads pkgPath, attaches an Ed25519 signature, and writes the result to outPath.
 func Sign(pkgPath string, priv ed25519.PrivateKey, outPath string) error {
-	manifest, wasm, _, err := readPkg(pkgPath)
+	manifest, binary, _, err := readPkg(pkgPath)
 	if err != nil {
 		return err
 	}
 
-	sig := ed25519.Sign(priv, digest(manifest, wasm))
-	return writePkg(outPath, manifest, wasm, sig)
+	sig := ed25519.Sign(priv, digest(manifest, binary))
+	return writePkg(outPath, manifest, binary, sig)
 }
 
 // Verify reads pkgPath, verifies the embedded signature against pub, and returns package Info.
 func Verify(pkgPath string, pub ed25519.PublicKey) (*Info, error) {
-	manifest, wasm, sig, err := readPkg(pkgPath)
+	manifest, binary, sig, err := readPkg(pkgPath)
 	if err != nil {
 		return nil, err
 	}
 	if len(sig) == 0 {
 		return nil, fmt.Errorf("package is unsigned — run 'akira-cli sign' first")
 	}
-	if !ed25519.Verify(pub, digest(manifest, wasm), sig) {
+	if !ed25519.Verify(pub, digest(manifest, binary), sig) {
 		return nil, fmt.Errorf("signature mismatch")
 	}
 
 	info := &Info{
-		WASMSize:     int64(len(wasm)),
+		WASMSize:     int64(len(binary)),
 		ManifestSize: int64(len(manifest)),
 	}
 	// Best-effort name/version extraction from manifest JSON.
@@ -240,8 +241,14 @@ func digest(manifest, wasm []byte) []byte {
 	return h.Sum(nil)
 }
 
-// writePkg writes a .akpkg archive to outPath. sig may be nil for unsigned packages.
-func writePkg(outPath string, manifest, wasm, sig []byte) error {
+// writePkg writes a .akpkg archive to outPath. The binary entry name is chosen
+// from the magic bytes: AOT magic → "app.aot", otherwise → "app.wasm".
+// sig may be nil for unsigned packages.
+func writePkg(outPath string, manifest, binary, sig []byte) error {
+	binaryEntry := entryWASM
+	if DetectFormat(binary) == FormatAOT {
+		binaryEntry = entryAOT
+	}
 	f, err := os.Create(outPath)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", outPath, err)
@@ -257,7 +264,7 @@ func writePkg(outPath string, manifest, wasm, sig []byte) error {
 		data []byte
 	}{
 		{entryManifest, manifest},
-		{entryWASM, wasm},
+		{binaryEntry, binary},
 	} {
 		hdr := &tar.Header{
 			Name:     entry.name,
@@ -296,8 +303,8 @@ func writePkg(outPath string, manifest, wasm, sig []byte) error {
 	return gz.Close()
 }
 
-// readPkg reads and returns the contents of a .akpkg archive.
-func readPkg(pkgPath string) (manifest, wasm, sig []byte, err error) {
+// readPkg reads and returns the manifest, binary (wasm or aot), signature, and error.
+func readPkg(pkgPath string) (manifest, binary, sig []byte, err error) {
 	data, err := os.ReadFile(pkgPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("read %s: %w", pkgPath, err)
@@ -327,8 +334,8 @@ func readPkg(pkgPath string) (manifest, wasm, sig []byte, err error) {
 		switch hdr.Name {
 		case entryManifest:
 			manifest = content
-		case entryWASM:
-			wasm = content
+		case entryWASM, entryAOT:
+			binary = content
 		case entrySignature:
 			sig = content
 		}
@@ -337,8 +344,8 @@ func readPkg(pkgPath string) (manifest, wasm, sig []byte, err error) {
 	if manifest == nil {
 		return nil, nil, nil, fmt.Errorf("missing %s in archive", entryManifest)
 	}
-	if wasm == nil {
-		return nil, nil, nil, fmt.Errorf("missing %s in archive", entryWASM)
+	if binary == nil {
+		return nil, nil, nil, fmt.Errorf("missing app.wasm or app.aot in archive")
 	}
-	return manifest, wasm, sig, nil
+	return manifest, binary, sig, nil
 }
