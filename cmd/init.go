@@ -25,10 +25,11 @@ const (
 	llvmBranch      = "xtensa_release_18.1.2"
 )
 
-var initWASIDir  string
-var initWAMRDir  string
-var initSkipWASI bool
-var initSkipWAMR bool
+var initWASIDir      string
+var initWAMRDir      string
+var initSkipWASI    bool
+var initSkipWAMR    bool
+var initSkipPrereqs bool
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -36,30 +37,37 @@ var initCmd = &cobra.Command{
 	Long: `Bootstrap the AkiraOS WASM toolchain on this machine.
 
 Installs:
+  0. System prerequisites — git, cmake, ninja, python3, curl (via apt/dnf/pacman/brew)
   1. WASI SDK ` + wasiSDKVersion + `   — C→WASM compiler (clang + wasi-libc)
   2. WAMR (AkiraOS_Patch branch) — runtime + wamrc AOT compiler
      Builds wamrc with Espressif LLVM (Xtensa backend) for ESP32-S3 support.
 
-Prerequisites (must already be installed):
-  cmake, ninja (or make), python3, git, curl/wget
-
   akira-cli init
   akira-cli init --wasi-dir /opt/wasi-sdk --wamr-dir ~/wamr
-  akira-cli init --skip-wasi   # only install wamrc
-  akira-cli init --skip-wamr   # only install WASI SDK`,
+  akira-cli init --skip-prereqs          # skip system package install
+  akira-cli init --skip-wasi             # only install wamrc
+  akira-cli init --skip-wamr             # only install WASI SDK`,
 	RunE: runInit,
 }
 
 func init() {
 	initCmd.Flags().StringVar(&initWASIDir, "wasi-dir", "/opt/wasi-sdk", "install WASI SDK to this directory")
 	initCmd.Flags().StringVar(&initWAMRDir, "wamr-dir", filepath.Join(os.Getenv("HOME"), "wamr"), "clone WAMR into this directory")
+	initCmd.Flags().BoolVar(&initSkipPrereqs, "skip-prereqs", false, "skip system package installation")
 	initCmd.Flags().BoolVar(&initSkipWASI, "skip-wasi", false, "skip WASI SDK installation")
 	initCmd.Flags().BoolVar(&initSkipWAMR, "skip-wamr", false, "skip WAMR / wamrc build")
 	rootCmd.AddCommand(initCmd)
 }
 
 func runInit(_ *cobra.Command, _ []string) error {
-	checkPrereqs()
+	if !initSkipPrereqs {
+		if err := installPrereqs(); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println("Skipping system prerequisites.")
+		checkPrereqs()
+	}
 
 	if !initSkipWASI {
 		if err := installWASI(); err != nil {
@@ -92,6 +100,105 @@ func runInit(_ *cobra.Command, _ []string) error {
 	fmt.Println("  akira-cli install hello_world.akpkg --device <ip> --token <token>")
 	fmt.Println("─────────────────────────────────────────────────")
 	return nil
+}
+
+// installPrereqs installs missing system tools using the available package manager.
+func installPrereqs() error {
+	required := []string{"git", "cmake", "python3", "curl"}
+
+	// Detect missing tools.
+	missing := []string{}
+	for _, t := range required {
+		if _, err := exec.LookPath(t); err != nil {
+			missing = append(missing, t)
+		}
+	}
+
+	// Also check for ninja (may be named ninja or ninja-build).
+	if _, err := exec.LookPath("ninja"); err != nil {
+		if _, err2 := exec.LookPath("ninja-build"); err2 != nil {
+			missing = append(missing, "ninja")
+		}
+	}
+
+	if len(missing) == 0 {
+		fmt.Println("✓ All system prerequisites already installed.")
+		return nil
+	}
+
+	fmt.Printf("Installing missing tools: %s\n", strings.Join(missing, ", "))
+
+	switch runtime.GOOS {
+	case "linux":
+		return installPrereqsLinux(missing)
+	case "darwin":
+		return installPrereqsDarwin(missing)
+	default:
+		fmt.Printf("WARNING: cannot auto-install on %s — install manually: %s\n",
+			runtime.GOOS, strings.Join(missing, " "))
+		return nil
+	}
+}
+
+// installPrereqsLinux tries apt, dnf, then pacman.
+func installPrereqsLinux(tools []string) error {
+	// Map generic names → distro package names.
+	aptPkgs := map[string]string{
+		"ninja": "ninja-build",
+	}
+	dnfPkgs := map[string]string{
+		"ninja": "ninja-build",
+	}
+
+	if _, err := exec.LookPath("apt-get"); err == nil {
+		pkgs := make([]string, 0, len(tools))
+		for _, t := range tools {
+			if p, ok := aptPkgs[t]; ok {
+				pkgs = append(pkgs, p)
+			} else {
+				pkgs = append(pkgs, t)
+			}
+		}
+		fmt.Printf("  sudo apt-get install -y %s\n", strings.Join(pkgs, " "))
+		args := append([]string{"apt-get", "install", "-y"}, pkgs...)
+		return runCmd("sudo", args...)
+	}
+
+	if _, err := exec.LookPath("dnf"); err == nil {
+		pkgs := make([]string, 0, len(tools))
+		for _, t := range tools {
+			if p, ok := dnfPkgs[t]; ok {
+				pkgs = append(pkgs, p)
+			} else {
+				pkgs = append(pkgs, t)
+			}
+		}
+		fmt.Printf("  sudo dnf install -y %s\n", strings.Join(pkgs, " "))
+		args := append([]string{"dnf", "install", "-y"}, pkgs...)
+		return runCmd("sudo", args...)
+	}
+
+	if _, err := exec.LookPath("pacman"); err == nil {
+		fmt.Printf("  sudo pacman -S --noconfirm %s\n", strings.Join(tools, " "))
+		args := append([]string{"pacman", "-S", "--noconfirm"}, tools...)
+		return runCmd("sudo", args...)
+	}
+
+	fmt.Printf("WARNING: no known package manager found — install manually: %s\n",
+		strings.Join(tools, " "))
+	return nil
+}
+
+// installPrereqsDarwin uses Homebrew.
+func installPrereqsDarwin(tools []string) error {
+	brew, err := exec.LookPath("brew")
+	if err != nil {
+		fmt.Println("WARNING: Homebrew not found — install it from https://brew.sh, then re-run.")
+		return nil
+	}
+	fmt.Printf("  %s install %s\n", brew, strings.Join(tools, " "))
+	args := append([]string{"install"}, tools...)
+	return runCmd(brew, args...)
 }
 
 // checkPrereqs warns about missing system tools but does not abort.

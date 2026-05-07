@@ -4,19 +4,54 @@ Developer toolchain for [AkiraOS](https://github.com/PenEngineering/AkiraOS) —
 
 ## Installation
 
+### Option 1 — Prebuilt binary
+
 ```sh
-# Homebrew (macOS / Linux)
-brew tap akiraos/tap
-brew install akira-cli
-
-# Go install ( make sure you have the GOBIN in PATH )
-go install github.com/PenEngineering/akira-cli@latest
-
-# Download binary from GitHub Releases
-# https://github.com/PenEngineering/akira-cli/releases
+curl -fsSL https://raw.githubusercontent.com/PenEngineering/akira-cli/main/scripts/install.sh | bash
 ```
 
+Downloads the correct binary for your OS/architecture from the latest GitHub Release and installs it to `/usr/local/bin`.
+
+### Option 2 — Go install
+
+```sh
+go install github.com/PenEngineering/akira-cli@latest
+```
+
+Requires Go ≥ 1.22. The binary is placed in `$GOPATH/bin` (usually `~/go/bin`). Run the helper script once to add it to your `PATH`:
+
+```sh
+bash scripts/gopath-setup.sh
+source ~/.bashrc   # or ~/.zshrc / ~/.config/fish/config.fish
+```
+
+> **After installing**, run `akira-cli init` once to install all required dependencies (WASI SDK, WAMR, wamrc):
+> ```sh
+> akira-cli init
+> ```
+
 ## Commands
+
+### `init` — Install development dependencies
+
+```sh
+akira-cli init
+```
+
+Downloads and installs the WASI SDK, WAMR runtime, and `wamrc` compiler. Must be run once before using other commands.
+
+After `init` completes, add the following to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) and reload it:
+
+```sh
+export WASI_SDK=/opt/wasi-sdk                          # default; matches --wasi-dir if overridden
+export PATH="$PATH:$HOME/wamr/wamr-compiler/build"    # exposes wamrc; matches --wamr-dir if overridden
+```
+
+```sh
+source ~/.bashrc   # or ~/.zshrc / ~/.config/fish/config.fish
+```
+
+---
 
 ### `keygen` — Generate keypair + provisioning bundle
 
@@ -104,3 +139,5 @@ A `.akpkg` is a gzip-compressed tar archive:
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
+
+
