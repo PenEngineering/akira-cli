@@ -24,7 +24,8 @@ Commands:
   pack     Bundle a WASM app + manifest into an .akpkg archive
   sign     Sign an .akpkg with an Ed25519 private key
   verify   Verify an .akpkg signature offline
-  install  Push a signed .akpkg to an AkiraOS device over WiFi`,
+  install  Push a signed .akpkg to an AkiraOS device over WiFi
+  update   Flash new AkiraOS firmware via OTA (HTTP /upload)`,
 	SilenceUsage: true,
 }
 
