@@ -9,9 +9,10 @@
 //
 //	manifest.json   — application metadata (required)
 //	app.wasm        — compiled WebAssembly binary (required)
+//	model.tflite    — TFLite Micro model (optional; added by PackWithModel)
 //	sig.ed25519     — 64-byte Ed25519 signature (optional; added by Sign)
 //
-// The signature covers SHA-256(manifest_bytes || wasm_bytes).
+// The signature covers SHA-256(manifest_bytes || wasm_bytes [|| model_bytes]).
 package akpkg
 
 import (
@@ -40,6 +41,7 @@ const (
 	entryManifest  = "manifest.json"
 	entryWASM      = "app.wasm"
 	entryAOT       = "app.aot"
+	entryModel     = "model.tflite"
 	entrySignature = "sig.ed25519"
 )
 
@@ -76,7 +78,7 @@ func DetectFormat(data []byte) Format {
 
 // ExtractBinary unpacks an .akpkg and returns the inner WASM/AOT binary bytes.
 func ExtractBinary(pkgPath string) ([]byte, error) {
-	_, binary, _, err := readPkg(pkgPath)
+	_, binary, _, _, err := readPkg(pkgPath)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +163,7 @@ func PackWithIcon(binPath, manifestPath, iconPath, outPath string) error {
 	default:
 		return fmt.Errorf("%s has unrecognised magic bytes — expected WASM (\\0asm) or AOT (\\0aot)", binPath)
 	}
-	return writePkg(outPath, manifestData, binData, nil)
+	return writePkg(outPath, manifestData, binData, nil, nil)
 }
 
 // Pack creates an unsigned .akpkg from binPath (WASM or AOT) and manifestPath,
@@ -190,30 +192,59 @@ func Pack(binPath, manifestPath, outPath string) error {
 		return fmt.Errorf("manifest.json is not valid JSON")
 	}
 
-	return writePkg(outPath, manifestData, binData, nil)
+	return writePkg(outPath, manifestData, binData, nil, nil)
+}
+
+// PackWithModel is like Pack but also bundles a TFLite Micro model into the archive.
+// The model bytes are included in the signing digest.
+func PackWithModel(binPath, manifestPath, modelPath, outPath string) error {
+	binData, err := os.ReadFile(binPath)
+	if err != nil {
+		return fmt.Errorf("read binary: %w", err)
+	}
+	switch DetectFormat(binData) {
+	case FormatWASM, FormatAOT: // ok
+	default:
+		return fmt.Errorf("%s has unrecognised magic bytes — expected WASM (\\0asm) or AOT (\\0aot)", binPath)
+	}
+
+	manifestData, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+	if !json.Valid(manifestData) {
+		return fmt.Errorf("manifest.json is not valid JSON")
+	}
+
+	modelData, err := os.ReadFile(modelPath)
+	if err != nil {
+		return fmt.Errorf("read model: %w", err)
+	}
+
+	return writePkg(outPath, manifestData, binData, nil, modelData)
 }
 
 // Sign reads pkgPath, attaches an Ed25519 signature, and writes the result to outPath.
 func Sign(pkgPath string, priv ed25519.PrivateKey, outPath string) error {
-	manifest, binary, _, err := readPkg(pkgPath)
+	manifest, binary, model, _, err := readPkg(pkgPath)
 	if err != nil {
 		return err
 	}
 
-	sig := ed25519.Sign(priv, digest(manifest, binary))
-	return writePkg(outPath, manifest, binary, sig)
+	sig := ed25519.Sign(priv, digest(manifest, binary, model))
+	return writePkg(outPath, manifest, binary, sig, model)
 }
 
 // Verify reads pkgPath, verifies the embedded signature against pub, and returns package Info.
 func Verify(pkgPath string, pub ed25519.PublicKey) (*Info, error) {
-	manifest, binary, sig, err := readPkg(pkgPath)
+	manifest, binary, model, sig, err := readPkg(pkgPath)
 	if err != nil {
 		return nil, err
 	}
 	if len(sig) == 0 {
 		return nil, fmt.Errorf("package is unsigned — run 'akira-cli sign' first")
 	}
-	if !ed25519.Verify(pub, digest(manifest, binary), sig) {
+	if !ed25519.Verify(pub, digest(manifest, binary, model), sig) {
 		return nil, fmt.Errorf("signature mismatch")
 	}
 
@@ -233,18 +264,22 @@ func Verify(pkgPath string, pub ed25519.PublicKey) (*Info, error) {
 	return info, nil
 }
 
-// digest returns SHA-256(manifest || wasm) — the message signed by Sign and verified by Verify.
-func digest(manifest, wasm []byte) []byte {
+// digest returns SHA-256(manifest || wasm [|| model]) — the message signed by Sign.
+// model may be nil for packages without a bundled model.
+func digest(manifest, wasm, model []byte) []byte {
 	h := sha256.New()
 	h.Write(manifest)
 	h.Write(wasm)
+	if len(model) > 0 {
+		h.Write(model)
+	}
 	return h.Sum(nil)
 }
 
 // writePkg writes a .akpkg archive to outPath. The binary entry name is chosen
 // from the magic bytes: AOT magic → "app.aot", otherwise → "app.wasm".
-// sig may be nil for unsigned packages.
-func writePkg(outPath string, manifest, binary, sig []byte) error {
+// sig and model may be nil for unsigned or model-free packages.
+func writePkg(outPath string, manifest, binary, sig, model []byte) error {
 	binaryEntry := entryWASM
 	if DetectFormat(binary) == FormatAOT {
 		binaryEntry = entryAOT
@@ -281,6 +316,22 @@ func writePkg(outPath string, manifest, binary, sig []byte) error {
 		}
 	}
 
+	if len(model) > 0 {
+		hdr := &tar.Header{
+			Name:     entryModel,
+			Size:     int64(len(model)),
+			Mode:     0644,
+			ModTime:  now,
+			Typeflag: tar.TypeReg,
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := tw.Write(model); err != nil {
+			return err
+		}
+	}
+
 	if sig != nil {
 		hdr := &tar.Header{
 			Name:     entrySignature,
@@ -303,16 +354,16 @@ func writePkg(outPath string, manifest, binary, sig []byte) error {
 	return gz.Close()
 }
 
-// readPkg reads and returns the manifest, binary (wasm or aot), signature, and error.
-func readPkg(pkgPath string) (manifest, binary, sig []byte, err error) {
+// readPkg reads and returns the manifest, binary (wasm or aot), model, signature, and error.
+func readPkg(pkgPath string) (manifest, binary, model, sig []byte, err error) {
 	data, err := os.ReadFile(pkgPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("read %s: %w", pkgPath, err)
+		return nil, nil, nil, nil, fmt.Errorf("read %s: %w", pkgPath, err)
 	}
 
 	gz, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("not a valid .akpkg (gzip error): %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("not a valid .akpkg (gzip error): %w", err)
 	}
 	defer gz.Close()
 
@@ -323,12 +374,12 @@ func readPkg(pkgPath string) (manifest, binary, sig []byte, err error) {
 			break
 		}
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("read tar: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("read tar: %w", err)
 		}
 
 		content, err := io.ReadAll(io.LimitReader(tr, 32<<20)) // 32 MiB cap
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("read entry %s: %w", hdr.Name, err)
+			return nil, nil, nil, nil, fmt.Errorf("read entry %s: %w", hdr.Name, err)
 		}
 
 		switch hdr.Name {
@@ -336,16 +387,18 @@ func readPkg(pkgPath string) (manifest, binary, sig []byte, err error) {
 			manifest = content
 		case entryWASM, entryAOT:
 			binary = content
+		case entryModel:
+			model = content
 		case entrySignature:
 			sig = content
 		}
 	}
 
 	if manifest == nil {
-		return nil, nil, nil, fmt.Errorf("missing %s in archive", entryManifest)
+		return nil, nil, nil, nil, fmt.Errorf("missing %s in archive", entryManifest)
 	}
 	if binary == nil {
-		return nil, nil, nil, fmt.Errorf("missing app.wasm or app.aot in archive")
+		return nil, nil, nil, nil, fmt.Errorf("missing app.wasm or app.aot in archive")
 	}
-	return manifest, binary, sig, nil
+	return manifest, binary, model, sig, nil
 }
