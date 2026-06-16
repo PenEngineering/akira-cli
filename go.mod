@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/muka/go-bluetooth v0.0.0-20240701044517-04c4f09c514e
+	github.com/open-quantum-safe/liboqs-go v0.0.0-20240512165921-9f01052a9f7b
 	github.com/spf13/cobra v1.8.1
 	golang.org/x/image v0.39.0
 )
