@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//go:build cgo
+//go:build cgo && pqc
 
 // Dilithium-2 (CRYSTALS-Dilithium / FIPS 204 ML-DSA-44) support via liboqs-go.
 // Requires liboqs shared library installed on the build host.

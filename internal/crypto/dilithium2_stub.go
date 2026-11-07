@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//go:build !cgo
+//go:build !cgo || !pqc
 
-// Fallback when akira-cli is built without cgo (CGO_ENABLED=0). The real
+// Fallback when akira-cli is built without the `pqc` tag (or without cgo). The real
 // Dilithium-2 implementation (dilithium2.go) needs liboqs via cgo; without it,
 // PQC signing/verification is unavailable. These stubs keep the rest of the tool
 // (pack, sign, verify, install, the device commands) building and working — the
@@ -16,7 +16,7 @@ package crypto
 import "fmt"
 
 const dilithiumUnavailable = "Dilithium-2 (PQC) is unavailable: this akira-cli was built " +
-	"without cgo/liboqs. Rebuild with CGO_ENABLED=1 and liboqs installed."
+	"without the pqc build tag. Rebuild with CGO_ENABLED=1 and -tags pqc (liboqs required)."
 
 // GenerateDilithiumKeyPair is unavailable in a cgo-free build.
 func GenerateDilithiumKeyPair() (pub, priv []byte, err error) {

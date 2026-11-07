@@ -145,6 +145,21 @@ These call the device REST API on port 8080 (`/api/v1/info`, `/api/v1/logs`,
 
 ---
 
+## Post-quantum signing (optional)
+
+The `--pqc` flag on `keygen`/`sign`/`verify` adds Dilithium-2 (FIPS 204 ML-DSA-44) via
+liboqs — an AkiraPlatform feature. It is gated behind the `pqc` build tag, so the prebuilt
+release binaries do **not** include it (they use Ed25519 only). To use PQC, build from
+source with cgo and liboqs installed:
+
+```sh
+CGO_ENABLED=1 go build -tags pqc -o akira-cli .
+```
+
+Without the tag, the `--pqc` paths report that PQC is unavailable.
+
+---
+
 ## `.akpkg` Format
 
 A `.akpkg` is a gzip-compressed tar archive:

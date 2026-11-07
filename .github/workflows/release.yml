@@ -10,22 +10,25 @@ permissions:
 
 jobs:
   release:
-    name: Build and release
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.runner }}
+    continue-on-error: ${{ matrix.experimental }}
 
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
-            goarch: arm64
-          - goos: windows
-            goarch: amd64
+          # Linux and Windows build cgo-free on Linux: the BLE transports there
+          # (D-Bus / WinRT) are pure Go, and the optional Dilithium-2 PQC path is
+          # behind the `pqc` build tag (liboqs), which prebuilt binaries omit.
+          - { runner: ubuntu-latest, goos: linux,   goarch: amd64, cgo: "0", experimental: false }
+          - { runner: ubuntu-latest, goos: linux,   goarch: arm64, cgo: "0", experimental: false }
+          - { runner: ubuntu-latest, goos: windows, goarch: amd64, cgo: "0", experimental: false }
+          # macOS BLE uses CoreBluetooth (cgo), so darwin builds on a macOS runner
+          # with cgo on. Marked experimental so a macOS build hiccup never blocks
+          # the Linux/Windows release.
+          - { runner: macos-latest,  goos: darwin,  goarch: arm64, cgo: "1", experimental: true }
+          - { runner: macos-latest,  goos: darwin,  goarch: amd64, cgo: "1", experimental: true }
 
     steps:
       - uses: actions/checkout@v4
@@ -34,16 +37,14 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache: true
-
-      - name: Generate go.sum
-        run: go mod tidy
 
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: |
           EXT=""
           [ "$GOOS" = "windows" ] && EXT=".exe"
@@ -52,7 +53,6 @@ jobs:
           go build \
             -ldflags "-s -w -X github.com/PenEngineering/akira-cli/cmd.Version=${VERSION}" \
             -o "dist/${BINARY}" .
-          echo "BINARY=dist/${BINARY}" >> "$GITHUB_ENV"
 
       - name: Upload artefact
         uses: actions/upload-artifact@v4
