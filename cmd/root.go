@@ -25,7 +25,13 @@ Commands:
   sign     Sign an .akpkg with an Ed25519 private key
   verify   Verify an .akpkg signature offline
   install  Push a signed .akpkg to an AkiraOS device over WiFi
-  update   Flash new AkiraOS firmware via OTA (HTTP /upload)`,
+  update   Flash new AkiraOS firmware via OTA (HTTP /upload)
+  info     Print a connected device's info (/api/v1/info)
+  logs     Fetch a connected device's logs (/api/v1/logs)
+  apps     List / start / stop / remove apps on a device
+
+The app developer workflow (new, build, deploy --sim, device discovery and
+publish) lives in the Python 'akira' CLI (pipx install akira-dev).`,
 	SilenceUsage: true,
 }
 

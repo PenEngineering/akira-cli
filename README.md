@@ -124,6 +124,25 @@ Streams the package directly to the device over the USB HID raw channel (Report 
 
 > **Windows:** No extra setup needed — WinUSB/HID class driver is used directly.
 
+### `info` / `logs` / `apps` — manage a connected device
+
+```sh
+akira-cli info  --device 192.168.1.42
+akira-cli logs  --device 192.168.1.42
+akira-cli apps list              --device 192.168.1.42
+akira-cli apps start  snake      --device 192.168.1.42
+akira-cli apps stop   snake      --device 192.168.1.42
+akira-cli apps remove snake      --device 192.168.1.42
+```
+
+These call the device REST API on port 8080 (`/api/v1/info`, `/api/v1/logs`,
+`/api/v1/apps*`). `--device` accepts `host` or `host:port` (default port 8080).
+
+> The app developer workflow — `new`, `build`, `deploy --sim`, mDNS `devices`
+> discovery and `publish` to the catalogue — lives in the Python **`akira`** CLI
+> (`pipx install akira-dev`). `akira-cli` keeps the packaging/signing/transport
+> primitives and the on-device management commands above.
+
 ---
 
 ## `.akpkg` Format

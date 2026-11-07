@@ -158,3 +158,27 @@ func (c *HTTPClient) OtaUpdate(firmwarePath string, onProgress func(read, total 
 	}
 	return nil
 }
+
+// Device sends a simple request (no body) to the device REST API at the given
+// path (e.g. "/api/v1/apps") and returns the HTTP status and response body.
+// Used by the info, logs and apps commands. The bearer token, when set, is sent
+// as Authorization for parity with the OTA endpoints.
+func (c *HTTPClient) Device(method, path string) (int, string, error) {
+	req, err := http.NewRequest(method, c.baseURL+path, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, "", err
+	}
+	return resp.StatusCode, string(body), nil
+}
